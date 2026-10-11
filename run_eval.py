@@ -191,8 +191,13 @@ def write_report(rows, args):
                 f"- selected_item: {item.get('title', '(none)')}"
                 + (f" (${item.get('price')}, {item.get('platform')})" if item else ""),
                 f"- search_results: {len(session.get('search_results') or [])}",
-                "",
             ]
+            # Every result, so a criterion about the filters can be scored.
+            lines += [
+                f"  - {r['id']} {r['title']} — size {r['size']}, ${r['price']:.0f}"
+                for r in session.get("search_results") or []
+            ]
+            lines += [""]
             if session.get("outfit_suggestion"):
                 lines += ["Outfit suggestion:", "", "```",
                           str(session["outfit_suggestion"]), "```", ""]
