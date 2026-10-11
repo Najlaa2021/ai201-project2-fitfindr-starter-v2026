@@ -17,9 +17,21 @@ import re
 
 import config
 import trace
-from tools import search_listings, suggest_outfit, create_fit_card
+from tools import suggest_outfit, create_fit_card
+from mcp_client import call_tool
 from generate import ModelUnavailable
 from utils.data_loader import load_listings
+
+
+# ── search, through MCP ───────────────────────────────────────────────────────
+
+def _search(description: str, size: str | None, max_price: float | None) -> list[dict]:
+    """search_listings, called through the MCP server in mcp_server.py."""
+    return call_tool("search_listings", {
+        "description": description,
+        "size": size,
+        "max_price": max_price,
+    })
 
 
 # ── query parsing ─────────────────────────────────────────────────────────────
@@ -66,7 +78,7 @@ def _empty_search_message(parsed: dict) -> str:
     what = f"'{desc}'" if desc else "your search"
 
     if max_price is not None:
-        without_price = search_listings(desc, size=size, max_price=None)
+        without_price = _search(desc, size, None)
         if without_price:
             cheapest = min(item["price"] for item in without_price)
             return (
@@ -76,7 +88,7 @@ def _empty_search_message(parsed: dict) -> str:
             )
 
     if size:
-        without_size = search_listings(desc, size=None, max_price=max_price)
+        without_size = _search(desc, None, max_price)
         if without_size:
             sizes = sorted({item["size"] for item in without_size})
             return (
@@ -195,10 +207,8 @@ def run_agent(query: str, wardrobe: dict) -> dict:
 
         elif step == "search":
             parsed = session["parsed"]
-            session["search_results"] = search_listings(
-                parsed["description"],
-                size=parsed["size"],
-                max_price=parsed["max_price"],
+            session["search_results"] = _search(
+                parsed["description"], parsed["size"], parsed["max_price"]
             )
             # THE BRANCH: nothing found -> say what to change and stop.
             if not session["search_results"]:
