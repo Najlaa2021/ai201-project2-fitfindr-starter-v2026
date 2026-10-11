@@ -79,24 +79,59 @@
 
 ### `search_listings`
 
-- **What it does:**
-- **Inputs:** <!-- name and type each: `max_price` (float), not "a price" -->
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Filters `data/listings.json` by price ceiling and size,
+  then ranks what's left by keyword overlap with the description. No model call.
+- **Inputs:**
+  - `description` (str): free-text keywords, e.g. `"vintage graphic tee"`.
+    Filler words ("a", "for", "looking") are dropped.
+  - `size` (str | None): `None` skips the size filter. A size matches when it
+    equals one whole size token in the listing, ignoring case and any
+    parenthetical. `"M"` matches `M`, `S/M` and `M/L` but not `XL`. `"L"` does
+    not match `XL` or `W30 L30`. `"8"` and `"US 8"` match `US 8` but not
+    `US 8.5`. `"W30"` matches `W30 L30`. A `One Size` listing matches any
+    letter size (XS–XXL).
+  - `max_price` (float | None): inclusive ceiling. `None` skips the price filter.
+- **Returns:** `list[dict]` of at most `config.SEARCH_RESULT_LIMIT` (10)
+  listing dicts, best match first. Each dict is the unchanged listing record
+  with `id`, `title`, `description`, `category`, `style_tags`, `size`,
+  `condition`, `price`, `colors`, `brand`, `platform`. Scoring: each keyword
+  scores 3 if it's in the title, 2 if it's in `style_tags`, `category` or
+  `colors`, and 1 if it's only in `description`. Ties go to the lower price.
+- **When it has nothing:** `[]`, an empty list. Never `None`, and it never
+  raises. That covers no keyword hits, every hit filtered out by size or
+  price, and an empty description.
 
 ### `suggest_outfit`
 
-- **What it does:**
+- **What it does:** Asks the model for one or two outfits built around the new
+  item. When the wardrobe has items, each outfit names pieces from it.
 - **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+  - `new_item` (dict): one listing dict, the shape `search_listings` returns.
+  - `wardrobe` (dict): `{"items": [ {id, name, category, colors, style_tags, notes}, ... ]}`.
+    `items` may be empty.
+- **Returns:** `str`, non-empty plain text. It has one or two short outfits.
+  With a non-empty wardrobe, each outfit names at least one wardrobe item by
+  its `name`.
+- **When it has nothing:** With an empty wardrobe (`items == []`) it still
+  returns a non-empty `str` of general styling advice: what kinds of pieces
+  to pair the item with, and no claims about what the user owns. It never
+  returns `""` and never raises for an empty wardrobe. If the model returns
+  blank text, it returns a fixed fallback sentence naming the item.
 
 ### `create_fit_card`
 
-- **What it does:**
+- **What it does:** Asks the model for a short social-media caption about the
+  find and the outfit.
 - **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+  - `outfit` (str): the text `suggest_outfit` returned.
+  - `new_item` (dict): the same listing dict that went into `suggest_outfit`.
+- **Returns:** `str`, a 2–4 sentence caption that names the item, its price
+  (`$NN`) and its platform once each. It may use emoji and hashtags. Wording
+  changes from run to run (`TEMPERATURE = 0.9`).
+- **When it has nothing:** If `outfit` is empty or only whitespace, it skips
+  the model call and returns
+  `"Can't write a fit card for <title>: no outfit suggestion was provided."`
+  It never raises.
 
 ---
 
@@ -113,13 +148,36 @@
      The grader checks your code against what you claim here, so the file and
      function have to be real. -->
 
-**Branch rule:**
+**Branch rule:** If `search_listings` returns an empty list, put a message
+in `session["error"]` saying which part of the query to change, then stop.
+`suggest_outfit` and `create_fit_card` are not called, and
+`session["fit_card"]` stays `None`. Otherwise, put the first result in
+`session["selected_item"]` and go on to `suggest_outfit`, then
+`create_fit_card`.
+
+To make the message specific, the empty branch re-runs `search_listings` with
+one filter dropped at a time:
+- Matches exist when the price filter is dropped: say the cheapest one's price
+  and suggest raising the max.
+- Matches exist when the size filter is dropped: say which sizes do exist.
+- Neither helps: say the keywords matched nothing and suggest broader words.
 
 **Where it lives:** `agent.py::run_agent`
 
-**How the query is parsed:** <!-- regex, string splitting, or asking the model — say which -->
+**How the query is parsed:** regex, in `agent.py::parse_query`, with no model
+call.
+- `max_price`: `under $30`, `below 30`, `less than $30`, `max $30`, `$30 or less`.
+- `size`: `size M`, `in size M`, `size 8`, `size W30`.
+- Everything left over is the `description`.
 
-**What moves through the session:** <!-- which fields, in what order -->
+**What moves through the session:**
+1. `query`
+2. `parsed` (`description`, `size`, `max_price`)
+3. `search_results`
+4. `selected_item` (read back out of the session for both later tools)
+5. `outfit_suggestion` (read back out for the fit card)
+6. `fit_card`
+7. `error`, set only when the run stops early.
 
 ---
 
