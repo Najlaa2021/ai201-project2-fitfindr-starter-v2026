@@ -310,7 +310,11 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
         "product listing. Mention the item, the price and the platform once "
         "each. Be specific about the vibe of the outfit. The person posting "
         "bought this item; they are not selling it, so never write 'my "
-        f"{new_item.get('platform')}' or tell people to buy it from them. Up "
+        f"{new_item.get('platform')}' or tell people to buy it from them. "
+        "Open with how the outfit looks or feels, not with the purchase: "
+        "never start with 'Scored', 'Score', 'Just scored', 'Snagged', "
+        "'Found' or 'Grab', and never address the reader with an order. "
+        "Put the price and platform in the second or third sentence. Up "
         "to 3 hashtags at the end are fine. Return only the caption."
     )
     return generate(prompt, system="You write short, natural outfit captions.").strip()
