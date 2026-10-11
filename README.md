@@ -39,8 +39,13 @@
 
 ## What This Does
 
-<!-- Three or four sentences: what a user asks for, and what they get back. -->
-
+You ask FitFindr for a thrift item in plain language, for example
+`'vintage graphic tee under $30, size M'`. It pulls a description, a size and
+a price ceiling out of the request and searches 40 secondhand listings from
+Depop, thredUp and Poshmark. Then it suggests one or two outfits that pair the
+best match with clothes you already own, and writes a short caption you could
+post. If nothing matches, it stops before the styling steps and tells you
+which part of the request to change: the price, the size, or the words.
 
 
 ---
@@ -191,25 +196,55 @@ call.
 **One full query**
 
 ```
-$ python app.py ask '...'
+$ python app.py ask 'vintage graphic tee under $30'
 
+  Found:    Vintage Band Tee — Faded Grey — $19.0 on depop
+
+  Outfit:   Outfit 1: Grunge Streetwear
+Pair the vintage band tee with your baggy straight-leg jeans and black combat boots for an effortless, classic look. Throw on the vintage black denim jacket and finish with the black crossbody bag for extra edge.
+
+Outfit 2: High-Low Contrast
+Tuck the band tee into your wide-leg khaki trousers and accent the waist using the brown leather belt. Step into your chunky white sneakers to bridge the gap between casual grunge and neutral minimalism.
+
+  Fit card: Score this faded grey vintage band tee on Depop for just $19 and haven't stopped wearing it since. I love throwing it on with baggy denim and combat boots for a total grunge streetwear vibe, or dressing it down with tailored khakis and chunky sneakers. Such an easy, lived-in piece to style. 
+
+#depop #vintagestyle #grungefashion
+
+0 model calls this session, 2 served from cache
+```
+
+The same command on a query nothing can match, which takes the empty-search
+branch:
+
+```
+$ python app.py ask 'designer ballgown size XXS under $5'
+
+  No listings match the words in 'designer ballgown' even with the size and price filters removed. Try broader words, like an item type (accessories, bottoms, outerwear, shoes, tops) or a style such as 'vintage' or 'denim'.
+
+0 model calls this session
 ```
 
 **The three tools, tested one at a time**
 
 ```
 $ python -c "from tools import search_listings; print(search_listings('graphic tee', max_price=30))"
-
+[{'id': 'lst_006', 'title': 'Graphic Tee — 2003 Tour Bootleg Style', 'description': 'Vintage-style bootleg tee with faded graphic. Slightly boxy fit. 100% cotton, soft and worn-in.', 'category': 'tops', 'style_tags': ['graphic tee', 'vintage', 'grunge', 'streetwear', 'band tee'], 'size': 'L', 'condition': 'good', 'price': 24.0, 'colors': ['black'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_002', 'title': 'Y2K Baby Tee — Butterfly Print', 'description': 'Super cute early 2000s baby tee with butterfly graphic. Fitted crop length. Tag says medium but fits like a small.', 'category': 'tops', 'style_tags': ['y2k', 'vintage', 'graphic tee', 'cottagecore'], 'size': 'S/M', 'condition': 'excellent', 'price': 18.0, 'colors': ['white', 'pink', 'purple'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_033', 'title': 'Vintage Band Tee — Faded Grey', 'description': 'Faded grey band-style tee with distressed graphic. Crew neck. Fits boxy. Well-loved but no holes or major damage.', 'category': 'tops', 'style_tags': ['vintage', 'grunge', 'band tee', 'graphic tee', 'streetwear'], 'size': 'L', 'condition': 'fair', 'price': 19.0, 'colors': ['grey', 'charcoal'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_015', 'title': 'Vintage Graphic Hoodie — Faded Black', 'description': 'Faded black pullover hoodie with barely-visible vintage graphic on the chest. Cozy interior. Some pilling but adds to the worn-in look.', 'category': 'tops', 'style_tags': ['vintage', 'grunge', 'graphic', 'streetwear'], 'size': 'L', 'condition': 'fair', 'price': 26.0, 'colors': ['black', 'charcoal'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_017', 'title': 'Mesh Long-Sleeve Top — Black', 'description': 'Sheer black mesh long-sleeve. Great for layering under a graphic tee or over a bralette. Stretchy material, fits true to size.', 'category': 'tops', 'style_tags': ['y2k', 'grunge', 'goth', 'layering'], 'size': 'S/M', 'condition': 'excellent', 'price': 15.0, 'colors': ['black'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_012', 'title': 'Oversized Crewneck Sweatshirt — Vintage Navy', 'description': 'Perfectly faded navy crewneck. Genuinely vintage — not manufactured distressed. Ribbed cuffs and hem. No graphics, clean.', 'category': 'tops', 'style_tags': ['vintage', 'basics', 'oversized', 'classic'], 'size': 'XL (fits oversized)', 'condition': 'good', 'price': 20.0, 'colors': ['navy'], 'brand': None, 'platform': 'thredUp'}, {'id': 'lst_011', 'title': 'Low-Rise Cargo Pants — Khaki', 'description': 'Y2K era low-rise cargo pants. Lots of pockets. Khaki color, slightly distressed at the hems. Great for layering with a long tee.', 'category': 'bottoms', 'style_tags': ['y2k', 'cargo', '2000s', 'streetwear'], 'size': 'W29', 'condition': 'fair', 'price': 27.0, 'colors': ['khaki', 'tan'], 'brand': None, 'platform': 'poshmark'}]
 ```
 
 ```
-$ python -c "from tools import suggest_outfit; ..."
+$ python -c "from tools import suggest_outfit; from utils.data_loader import get_example_wardrobe, load_listings; print(suggest_outfit(load_listings()[0], get_example_wardrobe()))"
+Outfit 1:
+Pair the Vintage Levi's 501 Jeans with the White ribbed tank top tucked in, secured by the Brown leather belt. Throw on the Vintage black denim jacket and finish with the Chunky white sneakers for an effortless off-duty streetwear look.
 
+Outfit 2:
+Style the Vintage Levi's 501 Jeans with the Oversized grey crewneck sweatshirt worn slightly slouchy. Add the Black combat boots and the Black crossbody bag to give the classic denim an edgy, grunge-inspired finish.
 ```
 
 ```
-$ python -c "from tools import create_fit_card; ..."
+$ python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('jeans and white sneakers', load_listings()[0]))"
+Score these vintage Levi's 501 jeans for just $38 over on my Depop and they fit like an absolute dream. I kept it super casual today by pairing the medium wash denim with some fresh white sneakers for that effortless, everyday errand vibe. Snagged just in time for fall layering. 
 
+#vintagedenim #levis501 #depopseller
 ```
 
 ---
