@@ -38,6 +38,29 @@ _STOPWORDS = {
 
 _LETTER_SIZES = {"XXS", "XS", "S", "M", "L", "XL", "XXL"}
 
+# Words that name what kind of item someone wants, mapped to the words a
+# listing can have (title, category or style tags) to count as that kind.
+# Without this, "leather jacket" returns the leather belt, because "leather"
+# alone scores. Words are in _words() form, so plurals are already dropped.
+# "top" is left out on purpose: "Low-Top Canvas Sneakers" has it in its title.
+_JACKETS = {"jacket", "coat", "bomber", "windbreaker", "shacket", "blazer", "outerwear"}
+_SWEATERS = {"sweater", "sweatshirt", "crewneck", "hoodie", "cardigan", "jumper"}
+_SHIRTS = {"shirt", "tee", "polo", "henley", "flannel", "button", "blouse"}
+_PANTS = {"pant", "trouser", "jean"}
+_SHOES = {"shoe", "sneaker", "boot", "mary", "jane"}
+_ITEM_TYPES = {
+    "jacket": _JACKETS, "coat": _JACKETS, "bomber": {"bomber"},
+    "windbreaker": {"windbreaker"}, "shacket": {"shacket"}, "blazer": {"blazer"},
+    "sweater": _SWEATERS, "sweatshirt": {"sweatshirt", "crewneck"},
+    "crewneck": {"crewneck"}, "hoodie": {"hoodie"}, "cardigan": {"cardigan"},
+    "tee": {"tee"}, "shirt": _SHIRTS, "polo": {"polo"},
+    "henley": {"henley"}, "flannel": {"flannel"}, "blouse": {"blouse", "button"},
+    "pant": _PANTS, "trouser": {"trouser"}, "jean": {"jean"},
+    "short": {"short"}, "dress": {"dress"}, "skirt": {"skirt"}, "vest": {"vest"},
+    "shoe": _SHOES, "sneaker": {"sneaker"}, "boot": {"boot"},
+    "belt": {"belt"}, "bag": {"bag"}, "hat": {"hat"},
+}
+
 
 def _words(text: str) -> list[str]:
     """Lowercase words, with a trailing plural 's' dropped so jeans ~ jean."""
@@ -124,9 +147,16 @@ def search_listings(
     Test it from a terminal before you move on:
         python -c "from tools import search_listings; print(search_listings('graphic tee', max_price=30))"
     """
-    keywords = [w for w in _words(description or "") if w not in _STOPWORDS]
+    # "t-shirt" would split into "t" and "shirt" and rank the flannel first.
+    description = re.sub(r"\bt[\s-]?shirt", "tee", description or "", flags=re.I)
+    keywords = [w for w in _words(description) if w not in _STOPWORDS]
     if not keywords:
         return []
+
+    # If the description names an item type, a listing has to be one of them.
+    wanted_types = set()
+    for word in keywords:
+        wanted_types |= _ITEM_TYPES.get(word, set())
 
     scored = []
     for listing in load_listings():
@@ -140,6 +170,8 @@ def search_listings(
             listing["style_tags"] + listing["colors"] + [listing["category"]]
         )))
         body = set(_words(listing["description"]))
+        if wanted_types and not wanted_types & (title | tags):
+            continue
 
         score = 0
         for word in keywords:
@@ -276,8 +308,10 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
         f"How it's being styled:\n{outfit}\n\n"
         "Rules: 2 to 4 sentences. Sound like a real person posting, not a "
         "product listing. Mention the item, the price and the platform once "
-        "each. Be specific about the vibe of the outfit. Up to 3 hashtags at "
-        "the end are fine. Return only the caption."
+        "each. Be specific about the vibe of the outfit. The person posting "
+        "bought this item; they are not selling it, so never write 'my "
+        f"{new_item.get('platform')}' or tell people to buy it from them. Up "
+        "to 3 hashtags at the end are fine. Return only the caption."
     )
     return generate(prompt, system="You write short, natural outfit captions.").strip()
 

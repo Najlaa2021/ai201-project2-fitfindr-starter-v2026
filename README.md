@@ -84,11 +84,18 @@ which part of the request to change: the price, the size, or the words.
 
 ### `search_listings`
 
-- **What it does:** Filters `data/listings.json` by price ceiling and size,
-  then ranks what's left by keyword overlap with the description. No model call.
+- **What it does:** Filters `data/listings.json` by price ceiling, size and
+  item type, then ranks what's left by keyword overlap with the description.
+  No model call.
 - **Inputs:**
   - `description` (str): free-text keywords, e.g. `"vintage graphic tee"`.
-    Filler words ("a", "for", "looking") are dropped.
+    Filler words ("a", "for", "looking") are dropped, and "t-shirt" is read
+    as "tee". If the description names an item type (jacket, tee, jeans,
+    sneakers, belt, ...), a listing must be that type to match, so
+    `"leather jacket"` returns the leather bomber and never the leather belt.
+    "Jacket" also accepts bomber, blazer, windbreaker, shacket and anything in
+    `outerwear`; "shoes" accepts sneakers and boots. The full table is
+    `_ITEM_TYPES` in `tools.py`.
   - `size` (str | None): `None` skips the size filter. A size matches when it
     equals one whole size token in the listing, ignoring case and any
     parenthetical. `"M"` matches `M`, `S/M` and `M/L` but not `XL`. `"L"` does
@@ -103,8 +110,8 @@ which part of the request to change: the price, the size, or the words.
   scores 3 if it's in the title, 2 if it's in `style_tags`, `category` or
   `colors`, and 1 if it's only in `description`. Ties go to the lower price.
 - **When it has nothing:** `[]`, an empty list. Never `None`, and it never
-  raises. That covers no keyword hits, every hit filtered out by size or
-  price, and an empty description.
+  raises. That covers no keyword hits, every hit filtered out by size, price
+  or item type, and an empty description.
 
 ### `suggest_outfit`
 
@@ -206,20 +213,19 @@ Pair the vintage band tee with your baggy straight-leg jeans and black combat bo
 Outfit 2: High-Low Contrast
 Tuck the band tee into your wide-leg khaki trousers and accent the waist using the brown leather belt. Step into your chunky white sneakers to bridge the gap between casual grunge and neutral minimalism.
 
-  Fit card: Score this faded grey vintage band tee on Depop for just $19 and haven't stopped wearing it since. I love throwing it on with baggy denim and combat boots for a total grunge streetwear vibe, or dressing it down with tailored khakis and chunky sneakers. Such an easy, lived-in piece to style. 
-
-#depop #vintagestyle #grungefashion
+  Fit card: Scored this faded grey vintage band tee for just $19 on depop and I’m obsessed. It’s got the best wear-and-tear and looks unreal paired with baggy denim and combat boots for a full grunge moment. Even love it dressed up a bit tucked into wide-leg khakis with chunky white sneakers. #thrifted #depopfinds #streetwear
 
 0 model calls this session, 2 served from cache
 ```
 
 The same command on a query nothing can match, which takes the empty-search
-branch:
+branch. Leather jackets exist, but none under $20, so the message names the
+price as the thing to change:
 
 ```
-$ python app.py ask 'designer ballgown size XXS under $5'
+$ python app.py ask 'leather jacket under $20'
 
-  No listings match the words in 'designer ballgown' even with the size and price filters removed. Try broader words, like an item type (accessories, bottoms, outerwear, shoes, tops) or a style such as 'vintage' or 'denim'.
+  Nothing matching 'leather jacket' is under $20. The cheapest match is $33. Try raising your max price to $33 or more.
 
 0 model calls this session
 ```
@@ -228,7 +234,7 @@ $ python app.py ask 'designer ballgown size XXS under $5'
 
 ```
 $ python -c "from tools import search_listings; print(search_listings('graphic tee', max_price=30))"
-[{'id': 'lst_006', 'title': 'Graphic Tee — 2003 Tour Bootleg Style', 'description': 'Vintage-style bootleg tee with faded graphic. Slightly boxy fit. 100% cotton, soft and worn-in.', 'category': 'tops', 'style_tags': ['graphic tee', 'vintage', 'grunge', 'streetwear', 'band tee'], 'size': 'L', 'condition': 'good', 'price': 24.0, 'colors': ['black'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_002', 'title': 'Y2K Baby Tee — Butterfly Print', 'description': 'Super cute early 2000s baby tee with butterfly graphic. Fitted crop length. Tag says medium but fits like a small.', 'category': 'tops', 'style_tags': ['y2k', 'vintage', 'graphic tee', 'cottagecore'], 'size': 'S/M', 'condition': 'excellent', 'price': 18.0, 'colors': ['white', 'pink', 'purple'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_033', 'title': 'Vintage Band Tee — Faded Grey', 'description': 'Faded grey band-style tee with distressed graphic. Crew neck. Fits boxy. Well-loved but no holes or major damage.', 'category': 'tops', 'style_tags': ['vintage', 'grunge', 'band tee', 'graphic tee', 'streetwear'], 'size': 'L', 'condition': 'fair', 'price': 19.0, 'colors': ['grey', 'charcoal'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_015', 'title': 'Vintage Graphic Hoodie — Faded Black', 'description': 'Faded black pullover hoodie with barely-visible vintage graphic on the chest. Cozy interior. Some pilling but adds to the worn-in look.', 'category': 'tops', 'style_tags': ['vintage', 'grunge', 'graphic', 'streetwear'], 'size': 'L', 'condition': 'fair', 'price': 26.0, 'colors': ['black', 'charcoal'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_017', 'title': 'Mesh Long-Sleeve Top — Black', 'description': 'Sheer black mesh long-sleeve. Great for layering under a graphic tee or over a bralette. Stretchy material, fits true to size.', 'category': 'tops', 'style_tags': ['y2k', 'grunge', 'goth', 'layering'], 'size': 'S/M', 'condition': 'excellent', 'price': 15.0, 'colors': ['black'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_012', 'title': 'Oversized Crewneck Sweatshirt — Vintage Navy', 'description': 'Perfectly faded navy crewneck. Genuinely vintage — not manufactured distressed. Ribbed cuffs and hem. No graphics, clean.', 'category': 'tops', 'style_tags': ['vintage', 'basics', 'oversized', 'classic'], 'size': 'XL (fits oversized)', 'condition': 'good', 'price': 20.0, 'colors': ['navy'], 'brand': None, 'platform': 'thredUp'}, {'id': 'lst_011', 'title': 'Low-Rise Cargo Pants — Khaki', 'description': 'Y2K era low-rise cargo pants. Lots of pockets. Khaki color, slightly distressed at the hems. Great for layering with a long tee.', 'category': 'bottoms', 'style_tags': ['y2k', 'cargo', '2000s', 'streetwear'], 'size': 'W29', 'condition': 'fair', 'price': 27.0, 'colors': ['khaki', 'tan'], 'brand': None, 'platform': 'poshmark'}]
+[{'id': 'lst_006', 'title': 'Graphic Tee — 2003 Tour Bootleg Style', 'description': 'Vintage-style bootleg tee with faded graphic. Slightly boxy fit. 100% cotton, soft and worn-in.', 'category': 'tops', 'style_tags': ['graphic tee', 'vintage', 'grunge', 'streetwear', 'band tee'], 'size': 'L', 'condition': 'good', 'price': 24.0, 'colors': ['black'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_002', 'title': 'Y2K Baby Tee — Butterfly Print', 'description': 'Super cute early 2000s baby tee with butterfly graphic. Fitted crop length. Tag says medium but fits like a small.', 'category': 'tops', 'style_tags': ['y2k', 'vintage', 'graphic tee', 'cottagecore'], 'size': 'S/M', 'condition': 'excellent', 'price': 18.0, 'colors': ['white', 'pink', 'purple'], 'brand': None, 'platform': 'depop'}, {'id': 'lst_033', 'title': 'Vintage Band Tee — Faded Grey', 'description': 'Faded grey band-style tee with distressed graphic. Crew neck. Fits boxy. Well-loved but no holes or major damage.', 'category': 'tops', 'style_tags': ['vintage', 'grunge', 'band tee', 'graphic tee', 'streetwear'], 'size': 'L', 'condition': 'fair', 'price': 19.0, 'colors': ['grey', 'charcoal'], 'brand': None, 'platform': 'depop'}]
 ```
 
 ```
@@ -242,9 +248,7 @@ Style the Vintage Levi's 501 Jeans with the Oversized grey crewneck sweatshirt w
 
 ```
 $ python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('jeans and white sneakers', load_listings()[0]))"
-Score these vintage Levi's 501 jeans for just $38 over on my Depop and they fit like an absolute dream. I kept it super casual today by pairing the medium wash denim with some fresh white sneakers for that effortless, everyday errand vibe. Snagged just in time for fall layering. 
-
-#vintagedenim #levis501 #depopseller
+Scored these vintage Levi's 501 jeans for just $38 on Depop and I am officially obsessed. They have that perfect, lived-in medium wash that looks effortless with basic white sneakers. Such a solid find for a casual Sunday running errands. #vintagelevis #thriftedstyle #depopfinds
 ```
 
 ---
@@ -258,17 +262,36 @@ Score these vintage Levi's 501 jeans for just $38 over on my Depop and they fit 
      "I gave Claude my search_listings spec. It returned None on no match
      instead of an empty list, so I changed it" is the level we want. -->
 
-**Moment 1**
+**Moment 1: the fit card wrote as if I were the seller**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* I had Claude write `create_fit_card` from my spec: a
+  2–4 sentence caption naming the item, its price and its platform once each.
+- *What came back:* A prompt that did exactly that, but the captions kept
+  talking like the seller. The per-tool test said *"over on my Depop"*, and a
+  full run said *"Grab it on my Depop before I change my mind and keep it!"*
+  Someone who just thrifted a tee doesn't have a Depop shop selling it. The
+  prompt said "sound like a real person posting" and never said which person.
+- *What I changed:* I added a rule to the prompt: the poster bought the item,
+  isn't selling it, and never writes "my <platform>". Then I ran six captions
+  with the cache off across four items. None used seller wording, and all six
+  still had the price and platform.
 
-**Moment 2**
+**Moment 2: "leather jacket" found a belt**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* `search_listings` as I specced it in Milestone 2: rank
+  listings by keyword overlap, return `[]` only when nothing overlaps.
+- *What came back:* Code that matched the spec exactly. In a final check,
+  `'leather jacket under $20'` returned *Leather Belt — Brown, Braided — $12*,
+  then styled it and wrote a fit card for it. "Leather" scored, nothing that
+  was actually a jacket was under $20, so the belt won. The code was right;
+  my spec was wrong, because any one shared word counted as a match.
+- *What I changed:* The spec and the code. If the description names an item
+  type, a listing now has to be that type (`_ITEM_TYPES` in `tools.py`). My
+  first idea was to match the word "jacket" literally, but that would have
+  hidden the *90s Leather Bomber*, the one real leather jacket, so "jacket"
+  takes a small group of synonyms. Now the query takes the empty branch and
+  says *"The cheapest match is $33. Try raising your max price"*, and plain
+  `'leather jacket'` returns the bomber first.
 
 <!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
 
