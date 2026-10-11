@@ -375,19 +375,129 @@ that produced it:
 **Happy path**
 
 ```
+$ python app.py ask 'vintage graphic tee under $30' --trace
+[1] parse_query
+      in:  vintage graphic tee under $30
+      out: {'description': 'vintage graphic tee', 'size': None, 'max_price': 30.0}
+[2] search_listings (via MCP)
+      in:  {'description': 'vintage graphic tee', 'size': None, 'max_price': 30.0}
+      out: 3 items: Vintage Band Tee — Faded Grey, Graphic Tee — 2003 Tour Bootleg Style, Y2K Baby Tee — Butterfly Print
+[3] select
+      in:  search_results[0]
+      out: lst_033 Vintage Band Tee — Faded Grey ($19, depop)
+      →    search had results, going on to suggest_outfit
+[4] suggest_outfit
+      in:  new_item=lst_033 Vintage Band Tee — Faded Grey ($19, depop), wardrobe=10 items
+      out: Outfit 1: Grunge Streetwear Pair the vintage band tee with your baggy straight-leg jeans and black combat boot…
+[5] create_fit_card
+      in:  outfit=<suggest_outfit text>, new_item=lst_033 Vintage Band Tee — Faded Grey ($19, depop)
+      out: Scored this faded grey vintage band tee for just $19 on depop and I’m obsessed. It’s got the best wear-and-tea…
 
+  Found:    Vintage Band Tee — Faded Grey — $19.0 on depop
+
+  Outfit:   Outfit 1: Grunge Streetwear
+Pair the vintage band tee with your baggy straight-leg jeans and black combat boots for an effortless, classic look. Throw on the vintage black denim jacket and finish with the black crossbody bag for extra edge.
+
+Outfit 2: High-Low Contrast
+Tuck the band tee into your wide-leg khaki trousers and accent the waist using the brown leather belt. Step into your chunky white sneakers to bridge the gap between casual grunge and neutral minimalism.
+
+  Fit card: Scored this faded grey vintage band tee for just $19 on depop and I’m obsessed. It’s got the best wear-and-tear and looks unreal paired with baggy denim and combat boots for a full grunge moment. Even love it dressed up a bit tucked into wide-leg khakis with chunky white sneakers. #thrifted #depopfinds #streetwear
+
+0 model calls this session, 2 served from cache
 ```
 
 **Empty search**
 
-```
+Two fewer tool calls: it stops at step 3, and neither model tool runs. Step 4
+is the one extra search the stop message makes to find out which part of the
+query to change (here the price), and it runs after the decision to stop.
 
 ```
+$ python app.py ask 'leather jacket under $20' --trace
+[1] parse_query
+      in:  leather jacket under $20
+      out: {'description': 'leather jacket', 'size': None, 'max_price': 20.0}
+[2] search_listings (via MCP)
+      in:  {'description': 'leather jacket', 'size': None, 'max_price': 20.0}
+      out: [] (empty)
+[3] branch
+      →    search was empty: stop, no suggest_outfit or create_fit_card
+[4] search_listings (via MCP)
+      in:  {'description': 'leather jacket', 'size': None, 'max_price': None}
+      out: 4 items: 90s Leather Bomber — Black, Denim Jacket — Light Wash, Cropped, 90s Track Jacket — Navy/White Stripe … +1 more
+      →    retry without max_price, to word the message
+[5] stop
+      out: Nothing matching 'leather jacket' is under $20. The cheapest match is $33. Try raising your max price to $33 o…
 
-**On the MCP move:** <!-- what changed in your code, and whether anything
-behaved differently afterwards. If the rewire didn't work, say exactly where it
-broke — the error text and the last thing that worked. That earns the point in
-full. -->
+  Nothing matching 'leather jacket' is under $20. The cheapest match is $33. Try raising your max price to $33 or more.
+
+0 model calls this session
+```
+
+**On the MCP move:** `search_listings` is registered in `mcp_server.py`, with
+a description written for a caller who can't see the code: units (US
+dollars, inclusive), the size rule and the empty case. In
+`agent.py::run_agent` the direct call became `_search()`, which calls
+`mcp_client.call_tool("search_listings", ...)`. The two searches the
+empty-search message makes go through it too. `suggest_outfit` and
+`create_fit_card` are still direct calls. Before switching, I compared MCP
+against the direct call on three inputs (a normal hit, no hits, a size
+filter). All three were equal, and the empty case came back as `[]`, not
+`None` or a string, so nothing downstream changed. The one thing that did
+change is speed. Each MCP call starts the server, so an empty search with
+two retries now starts it three times. I also added a handler for
+`MCPError`: if the server won't start, the user gets *"The listings search
+couldn't be reached, so nothing was searched. Run `python mcp_client.py` to
+check the search server starts, then try again."* (tested by pointing the
+client at a missing server file).
+
+**The three failure modes, triggered on purpose**
+
+1. *Empty search*. Already handled in unit 3, unchanged:
+
+```
+$ python app.py ask 'sequin ballgown size XXS under $5'
+  No listings match the words in 'sequin ballgown' even with the size and price filters removed. Try broader words, like an item type (accessories, bottoms, outerwear, shoes, tops) or a style such as 'vintage' or 'denim'.
+
+0 model calls this session
+```
+
+2. *Empty wardrobe*. Already handled: general advice, no claims about what
+   the user owns:
+
+```
+$ python app.py ask 'denim jacket under $50' --empty-wardrobe
+(running with an empty wardrobe)
+
+  Found:    Denim Jacket — Light Wash, Cropped — $42.0 on poshmark
+
+  Outfit:   Idea one: Pair the cropped jacket with a black slip dress and chunky platform boots. Throw a vintage leather belt over the waist to balance the textures and add some edge. 
+
+Idea two: Layer it over a plain white cropped tank and baggy cargo trousers in olive green. Finish the streetwear look with retro canvas sneakers and a nylon shoulder bag.
+
+  Fit card: Scored this cropped light wash denim jacket on Poshmark for $42 and I'm obsessed. It looks so good toughened up with a black slip dress and chunky boots, or kept super casual over baggy cargos. Such an easy piece to throw on for that effortless 90s vibe. #thrifted #denimjacket #poshmarkfinds
+
+0 model calls this session, 2 served from cache
+```
+
+3. *Model unavailable* (one character of the key changed, on a query not in
+   the cache). **Before**, `run_agent` had no handler. The exception escaped
+   the loop, the session with the found item was lost, and only `app.py`'s
+   catch-all kept it from being a stack trace:
+
+```
+ModelUnavailable: The model rejected your API key. Check GEMINI_API_KEY in your .env file, or create a fresh key at aistudio.google.com.
+```
+
+   **After**, `run_agent` catches `ModelUnavailable`, keeps the session, and
+   says what it did find, what broke and what to do:
+
+```
+$ python app.py ask 'corduroy pants under $40'      # with a bad key
+  I found Corduroy Wide-Leg Pants — Rust ($32 on depop), but the styling step couldn't reach the model, so there's no outfit or fit card. The model rejected your API key. Check GEMINI_API_KEY in your .env file, or create a fresh key at aistudio.google.com. Then run the same query again.
+
+1 model calls this session
+```
 
 
 

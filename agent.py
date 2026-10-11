@@ -18,20 +18,25 @@ import re
 import config
 import trace
 from tools import suggest_outfit, create_fit_card
-from mcp_client import call_tool
+from mcp_client import call_tool, MCPError
 from generate import ModelUnavailable
 from utils.data_loader import load_listings
 
 
 # ── search, through MCP ───────────────────────────────────────────────────────
 
-def _search(description: str, size: str | None, max_price: float | None) -> list[dict]:
+def _search(description: str, size: str | None, max_price: float | None,
+            note: str = "") -> list[dict]:
     """search_listings, called through the MCP server in mcp_server.py."""
-    return call_tool("search_listings", {
-        "description": description,
-        "size": size,
-        "max_price": max_price,
-    })
+    args = {"description": description, "size": size, "max_price": max_price}
+    results = call_tool("search_listings", args)
+    trace.step("search_listings (via MCP)", inputs=str(args), returned=results, note=note)
+    return results
+
+
+def _item_ref(item: dict) -> str:
+    """How an item shows in the trace: id first, so criterion 3 can compare them."""
+    return f"{item['id']} {item['title']} (${item['price']:.0f}, {item['platform']})"
 
 
 # ── query parsing ─────────────────────────────────────────────────────────────
@@ -78,7 +83,7 @@ def _empty_search_message(parsed: dict) -> str:
     what = f"'{desc}'" if desc else "your search"
 
     if max_price is not None:
-        without_price = _search(desc, size, None)
+        without_price = _search(desc, size, None, note="retry without max_price, to word the message")
         if without_price:
             cheapest = min(item["price"] for item in without_price)
             return (
@@ -88,7 +93,7 @@ def _empty_search_message(parsed: dict) -> str:
             )
 
     if size:
-        without_size = _search(desc, None, max_price)
+        without_size = _search(desc, None, max_price, note="retry without size, to word the message")
         if without_size:
             sizes = sorted({item["size"] for item in without_size})
             return (
@@ -201,39 +206,76 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         count += 1
         trace.check_iterations(count)
 
-        if step == "parse":
-            session["parsed"] = parse_query(session["query"])
-            step = "search"
-
-        elif step == "search":
-            parsed = session["parsed"]
-            session["search_results"] = _search(
-                parsed["description"], parsed["size"], parsed["max_price"]
+        try:
+            step = _run_step(step, session)
+        except ModelUnavailable as exc:
+            item = session["selected_item"]
+            found = f"I found {item['title']} (${item['price']:.0f} on {item['platform']}), but " if item else ""
+            session["error"] = (
+                f"{found}the styling step couldn't reach the model, so there's no "
+                f"outfit or fit card. {exc} Then run the same query again."
             )
-            # THE BRANCH: nothing found -> say what to change and stop.
-            if not session["search_results"]:
-                session["error"] = _empty_search_message(parsed)
-                step = "done"
-            else:
-                step = "select"
-
-        elif step == "select":
-            session["selected_item"] = session["search_results"][0]
-            step = "outfit"
-
-        elif step == "outfit":
-            session["outfit_suggestion"] = suggest_outfit(
-                session["selected_item"], session["wardrobe"]
+            trace.step(_TOOL_FOR_STEP.get(step, step), note=f"ModelUnavailable, stopping: {exc}")
+            step = "done"
+        except MCPError as exc:
+            session["error"] = (
+                "The listings search couldn't be reached, so nothing was searched. "
+                "Run `python mcp_client.py` to check the search server starts, "
+                f"then try again. Details: {str(exc).splitlines()[0]}"
             )
-            step = "fit_card"
-
-        elif step == "fit_card":
-            session["fit_card"] = create_fit_card(
-                session["outfit_suggestion"], session["selected_item"]
-            )
+            trace.step(_TOOL_FOR_STEP.get(step, step), note="MCPError, stopping")
             step = "done"
 
     return session
+
+
+_TOOL_FOR_STEP = {"search": "search_listings (via MCP)", "outfit": "suggest_outfit", "fit_card": "create_fit_card"}
+
+
+def _run_step(step: str, session: dict) -> str:
+    """Run one step, record it in the session and the trace, return the next step."""
+    if step == "parse":
+        session["parsed"] = parse_query(session["query"])
+        trace.step("parse_query", inputs=session["query"], returned=str(session["parsed"]))
+        return "search"
+
+    if step == "search":
+        parsed = session["parsed"]
+        session["search_results"] = _search(
+            parsed["description"], parsed["size"], parsed["max_price"],
+        )
+        # THE BRANCH: nothing found -> say what to change and stop.
+        if not session["search_results"]:
+            trace.step("branch", note="search was empty: stop, no suggest_outfit or create_fit_card")
+            session["error"] = _empty_search_message(parsed)
+            trace.step("stop", returned=session["error"])
+            return "done"
+        return "select"
+
+    if step == "select":
+        session["selected_item"] = session["search_results"][0]
+        trace.step("select", inputs="search_results[0]",
+                   returned=_item_ref(session["selected_item"]),
+                   note="search had results, going on to suggest_outfit")
+        return "outfit"
+
+    if step == "outfit":
+        item, wardrobe = session["selected_item"], session["wardrobe"]
+        session["outfit_suggestion"] = suggest_outfit(item, wardrobe)
+        trace.step("suggest_outfit",
+                   inputs=f"new_item={_item_ref(item)}, wardrobe={len(wardrobe.get('items', []))} items",
+                   returned=session["outfit_suggestion"])
+        return "fit_card"
+
+    if step == "fit_card":
+        item = session["selected_item"]
+        session["fit_card"] = create_fit_card(session["outfit_suggestion"], item)
+        trace.step("create_fit_card",
+                   inputs=f"outfit=<suggest_outfit text>, new_item={_item_ref(item)}",
+                   returned=session["fit_card"])
+        return "done"
+
+    raise ValueError(f"unknown step {step!r}")
 
 
 # ── running it directly ───────────────────────────────────────────────────────
