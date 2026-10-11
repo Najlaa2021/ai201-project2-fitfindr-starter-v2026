@@ -430,15 +430,65 @@ Scored this cropped Wrangler denim jacket for just $42 on Poshmark and I'm obses
 
 | # | Criterion | Target | Verdict | How I decided |
 |---|---|---|---|---|
-| 1 |  |  |  |  |
-| 2 |  |  |  |  |
-| 3 |  |  |  |  |
-| 4 |  |  |  |  |
-| 5 |  |  |  |  |
+| 1 | Full three-tool run returns a fit card | 4 of 5 | MET (5/5) | All five tries reached `create_fit_card` and the session has a non-empty `fit_card`. None stopped early or crashed. The rate limiter paused the run twice, but it waited instead of failing, so no try was lost. |
+| 2 | Impossible query stops before `suggest_outfit` | 5 of 5 | MET (5/5) | In all five traces the step after the empty search is `branch`, and neither `suggest_outfit` nor `create_fit_card` appears. `fit_card` is `None`. The message says to try broader words and names the categories. |
+| 3 | Selected item's id is the one both later tools receive | 5 of 5 | MET (5/5) | In every try, `search_results[0]`, the `select` step, the `suggest_outfit` input and the `create_fit_card` input are all `lst_005`. |
+| 4 | Fit card: 2–4 sentences, exact `$` price, platform | 4 of 5 | MET (5/5) | All five cards are 3 sentences plus hashtags, and each has `$42` and `Poshmark`. I counted sentences after dropping the trailing hashtags, then read every card to check the count. |
+| 5 | Search results respect the $30 ceiling and size M | 5 of 5 | MET (5/5) | Every try returned one result, `lst_002` Y2K Baby Tee, size `S/M`, $18. That's under $30 and fits M. |
 
 **Diagnoses**
 
+There were no misses, so there's no failure to place in a tool, the
+branch, the session or the model's output. Honestly, though, three of these
+targets couldn't really be missed.
 
+- **Criteria 2, 3 and 5 test code that has no randomness.** I said so in
+  unit 3, and it's why they target 5 of 5. Five identical passes show there's
+  no bug on that path. They don't show the path holds up, because every try
+  ran the same inputs through the same `if`.
+- **Criterion 5 was a weaker test than I meant.** At the end of unit 3 I
+  made search respect item type. After that, `'vintage graphic tee under $30,
+  size M'` returns only one listing, so the size filter only had to keep one
+  item and reject nothing visible. In unit 3 the same query returned ten
+  results, including `One Size` items, which was a much better test of the
+  size rule. The criterion is fine. My choice of scenario stopped testing it
+  hard after I changed the search.
+- **Criteria 1 and 4 both beat their 4-of-5 target.** For criterion 1 the
+  risk I named, a failed model call, didn't happen because the rate limiter
+  waits instead of failing. Criterion 4 is the one that was set too low,
+  and it missed the most important problem.
+
+**What the criteria didn't catch: the fit cards are formulaic.** Reading
+all 25 fit cards from this run (`create_fit_card`, five scenarios that
+complete, five tries each):
+
+- **24 of 25 open with "scored" or "score".** First words: `scored` 17,
+  `score` 4, `just` (scored) 2, `finally` (scored) 1, `obsessed` 1.
+- **The five criterion-4 cards are almost word-for-word the same** up to the
+  price. Four start *"Scored this cropped Wrangler denim jacket"*.
+- **4 of 25 are written as orders to the reader**, like *"Score these rust
+  corduroy wide-leg pants on Depop for just $32"*. That's an ad telling
+  someone to buy, which is the seller voice I tried to remove in unit 3
+  coming back in a different form.
+
+Place and mechanism: **the model's output, caused by the prompt in
+`tools.py::create_fit_card`.** The prompt asks for the item, price and
+platform in a caption "like a real person posting". The model's most likely
+way to fit all three into one opening clause is "Scored this <item> for
+$NN on <platform>". At temperature 0.9 the words after the opening vary,
+but the opening hardly does, because nothing in the prompt pushes it
+anywhere else. My unit 3 rule ("never write 'my <platform>' or tell people
+to buy it from them") stopped *"my Depop"*. It didn't stop the imperative
+*"Score this… on Depop"*, because that doesn't say "my" or "from me".
+
+**The criterion I'd tighten is 4.** It checks the facts and the length, and
+every card passes, yet five captions for one jacket read like one caption.
+A tighter version: *"Across 5 tries on the same item, no two fit cards
+share their first five words, and none opens with an order to the reader
+('Score…', 'Grab…', 'Get…') — 4 of 5."* I'm not adding that to
+`criteria.md` as a revision. The original criterion could be measured and
+measured what it said, so this is a target that turned out to be low, not a
+broken criterion. It's what the improvement below goes after.
 
 ---
 
