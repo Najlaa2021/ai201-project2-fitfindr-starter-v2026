@@ -45,6 +45,26 @@
 
 ---
 
+## Notes from the data (Milestone 1)
+
+- **40 listings**, each with: `id`, `title`, `description`, `category`,
+  `style_tags` (list), `size`, `condition`, `price` (float), `colors` (list),
+  `brand` (str or None), `platform`.
+- **Sizes aren't one system.** Letter sizes (`S`, `M`, `L/XL`, `S/M`,
+  `XL (oversized)`), waist sizes (`W28`, `W30 L30`), shoe sizes (`US 8`,
+  `US 8.5`) and `One Size ...` all live in the same field. A plain substring
+  test is wrong: `"L" in "XL"` and `"L" in "W30 L30"` are both True.
+- **Prices** run from $12 to $75. Nothing is under $12, so `under $5`
+  can never match.
+- **Categories:** tops 15, bottoms 10, outerwear 8, shoes 4, accessories 3.
+  The silk slip dress (`lst_013`) is filed under `bottoms`.
+- **`brand` is None on most listings**, so no prompt can assume it.
+- **A wardrobe** is `{"items": [...]}`. Each item has `id`, `name`,
+  `category`, `colors`, `style_tags`, `notes`. The empty wardrobe is
+  `{"items": []}`, the same shape with an empty list.
+
+---
+
 ## Tool Inventory
 
 <!-- Four lines per tool. This is worth 2 points and it's the single most
