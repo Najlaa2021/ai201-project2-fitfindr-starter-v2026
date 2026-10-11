@@ -174,7 +174,9 @@ one filter dropped at a time:
 - Matches exist when the size filter is dropped: say which sizes do exist.
 - Neither helps: say the keywords matched nothing and suggest broader words.
 
-**Where it lives:** `agent.py::run_agent`
+**Where it lives:** `agent.py::run_agent`. Since unit 4, each pass of the
+loop calls `agent.py::_run_step`, and the `if not session["search_results"]`
+check is in its `search` step. The rule itself didn't change.
 
 **How the query is parsed:** regex, in `agent.py::parse_query`, with no model
 call.
@@ -311,19 +313,99 @@ Scored these vintage Levi's 501 jeans for just $38 on Depop and I am officially 
      `python run_eval.py --label before` runs everything and writes the table
      into results/. Paste it here and fill in the verdicts. -->
 
+`python run_eval.py --label before`: six scenarios (one per criterion, plus
+the empty-wardrobe diagnostic), five tries each, caching off, temperature
+0.9. Full output: `results/run_2026-10-11_1048_before.md`. I marked each
+try by the exact wording in `criteria.md`, and read every fit card myself
+as well.
+
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. Full three-tool run returns a fit card | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. Impossible query stops before suggest_outfit | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. Selected item's id is the one both later tools receive | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. Fit card: 2-4 sentences, exact $ price, platform | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 5. Search results respect $30 ceiling and size M | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
 
-**Real output from one try**, pasted as text, naming the file and function
-that produced it:
+**Real output from one try per criterion**, pasted from the run log:
+
+**Criterion 1**, try 1 of *matching query completes* (`run_2026-10-11_1048_before.md`; trace from `agent.py::run_agent`, card from `tools.py::create_fit_card`):
 
 ```
+[1] parse_query
+      in:  vintage graphic tee under $30
+      out: {'description': 'vintage graphic tee', 'size': None, 'max_price': 30.0}
+[2] search_listings (via MCP)
+      in:  {'description': 'vintage graphic tee', 'size': None, 'max_price': 30.0}
+      out: 3 items: Vintage Band Tee — Faded Grey, Graphic Tee — 2003 Tour Bootleg Style, Y2K Baby Tee — Butterfly Print
+[3] select
+      in:  search_results[0]
+      out: lst_033 Vintage Band Tee — Faded Grey ($19, depop)
+      →    search had results, going on to suggest_outfit
+[4] suggest_outfit
+      in:  new_item=lst_033 Vintage Band Tee — Faded Grey ($19, depop), wardrobe=10 items
+      out: Outfit 1: Pair the band tee with baggy straight-leg jeans and black combat boots for an effortless grunge look…
+[5] create_fit_card
+      in:  outfit=<suggest_outfit text>, new_item=lst_033 Vintage Band Tee — Faded Grey ($19, depop)
+      out: Scored this vintage faded grey band tee for just $19 on Depop and I’m obsessed. It’s got the best wear-and-tea…
 
+Fit card: Scored this vintage faded grey band tee for just $19 on Depop and I’m obsessed. It’s got the best wear-and-tear for nailing that effortless grunge look with baggy denim, or leaning earth-toned with wide-leg trousers. Honestly one of my best second-hand finds yet. #thrifted #depopfinds #streetwear
+```
+
+**Criterion 2**, try 1 of *impossible query stops early*. Stopped by the branch in `agent.py::_run_step` (called from `run_agent`); `suggest_outfit` never appears:
+
+```
+[1] parse_query
+      in:  designer ballgown size XXS under $5
+      out: {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+[2] search_listings (via MCP)
+      in:  {'description': 'designer ballgown', 'size': 'XXS', 'max_price': 5.0}
+      out: [] (empty)
+[3] branch
+      →    search was empty: stop, no suggest_outfit or create_fit_card
+[4] search_listings (via MCP)
+      in:  {'description': 'designer ballgown', 'size': 'XXS', 'max_price': None}
+      out: [] (empty)
+      →    retry without max_price, to word the message
+[5] search_listings (via MCP)
+      in:  {'description': 'designer ballgown', 'size': None, 'max_price': 5.0}
+      out: [] (empty)
+      →    retry without size, to word the message
+[6] stop
+      out: No listings match the words in 'designer ballgown' even with the size and price filters removed. Try broader w…
+```
+
+**Criterion 3**, try 1 of *selected item reaches both later tools*. `search_results[0]`, the `select` step and both tool inputs all show `lst_005` (trace from `agent.py::run_agent`):
+
+```
+[2] search_listings (via MCP)
+      in:  {'description': 'corduroy pants', 'size': None, 'max_price': 40.0}
+      out: 2 items: Corduroy Wide-Leg Pants — Rust, Low-Rise Cargo Pants — Khaki
+[3] select
+      in:  search_results[0]
+      out: lst_005 Corduroy Wide-Leg Pants — Rust ($32, depop)
+      →    search had results, going on to suggest_outfit
+[4] suggest_outfit
+      in:  new_item=lst_005 Corduroy Wide-Leg Pants — Rust ($32, depop), wardrobe=10 items
+      out: Outfit 1: Pair the corduroy wide-leg pants with the white ribbed tank top tucked in to highlight the high wais…
+[5] create_fit_card
+      in:  outfit=<suggest_outfit text>, new_item=lst_005 Corduroy Wide-Leg Pants — Rust ($32, depop)
+      out: Scored these rust wide-leg cords on Depop for $32 and I’m obsessed with how cozy they are. They’ve got the ult…
+```
+
+**Criterion 4**, try 1 of *fit card has price and platform* (`tools.py::create_fit_card`). 3 sentences plus hashtags, `$42`, `Poshmark`:
+
+```
+Scored this cropped Wrangler denim jacket for just $42 on Poshmark and I'm obsessed with the light wash. It’s the ultimate layering piece, whether I'm keeping it earthy with khaki trousers or leaning into a double-denim streetwear look with a baggy fit. Such a solid find for the wardrobe rotation. 
+
+#thriftfind #denimjacket #poshmarkstyle
+```
+
+**Criterion 5**, try 1 of *search respects price ceiling and size*. Every result from `tools.py::search_listings` (via MCP), as logged by `run_eval.py`:
+
+```
+- search_results: 1
+  - lst_002 Y2K Baby Tee — Butterfly Print — size S/M, $18
 ```
 
 ---
