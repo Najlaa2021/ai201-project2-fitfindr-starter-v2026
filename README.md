@@ -138,7 +138,8 @@ which part of the request to change: the price, the size, or the words.
   - `outfit` (str): the text `suggest_outfit` returned.
   - `new_item` (dict): the same listing dict that went into `suggest_outfit`.
 - **Returns:** `str`, a 2–4 sentence caption that names the item, its price
-  (`$NN`) and its platform once each. It may use emoji and hashtags. Wording
+  (`$NN`) and its platform once each. Since unit 4 it opens with the outfit,
+  not the purchase, and puts the price and platform in sentence two or three. It may use emoji and hashtags. Wording
   changes from run to run (`TEMPERATURE = 0.9`).
 - **When it has nothing:** If `outfit` is empty or only whitespace, it skips
   the model call and returns
@@ -294,6 +295,34 @@ Scored these vintage Levi's 501 jeans for just $38 on Depop and I am officially 
   takes a small group of synonyms. Now the query takes the empty branch and
   says *"The cheapest match is $33. Try raising your max price"*, and plain
   `'leather jacket'` returns the bomber first.
+
+**Unit 4, Moment 3: the scoring script was wrong, not the agent**
+
+- *What I asked for:* A script that marks each try PASS or FAIL by the
+  exact wording of my criteria, so the verdicts didn't depend on how I felt
+  about a run.
+- *What came back:* A script that worked on the before run, then marked
+  criterion 4 try 1 of the after run as FAIL: *"$42 NO"*. The card said
+  *"on Poshmark for just $42."* The price check was written to reject
+  `$42.50` when looking for `$42`, and it rejected a full stop too.
+- *What I changed:* The check now rejects only a digit or a decimal part
+  after the price. I rescored both runs and read all 50 cards myself. If I'd
+  trusted the script, I would have reported a criterion-4 regression that
+  never happened.
+
+**Unit 4, Moment 4: the two traces were the same length**
+
+- *What I asked for:* `trace.step()` calls in the loop, one per step.
+- *What came back:* Two problems. `trace.step()` printed even without
+  `--trace`, so every normal `ask` dumped the trace. And the empty-search
+  trace had five steps, the same as the happy path, because the stop
+  message re-runs the search twice to work out what to suggest. The brief
+  warns that equal-length traces mean a broken branch. Here the branch
+  worked, but the trace didn't show it.
+- *What I changed:* `trace.py` records only after `start_trace()`. The
+  `branch` step is now recorded right after the empty search, before the
+  retries, and each retry is labelled "to word the message". The empty
+  trace now shows the stop at step 3, with no model tool after it.
 
 <!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
 
@@ -642,36 +671,119 @@ $ python app.py ask 'corduroy pants under $40'      # with a bad key
 
      `python run_eval.py --label after` -->
 
-**What I changed:**
+**What I changed:** one prompt, in `tools.py::create_fit_card`. I added
+three rules: open with how the outfit looks or feels, not with the purchase;
+never start with "Scored", "Score", "Just scored", "Snagged", "Found" or
+"Grab", or with an order to the reader; and put the price and platform in
+the second or third sentence. Nothing else changed between the two runs: same
+scenarios, same five tries, caching off, temperature 0.9. The change is its
+own commit (`367af4a`).
 
-**Which failure it was meant to fix:**
+**Which failure it was meant to fix:** the one in Verdicts and Diagnoses:
+24 of 25 fit cards opening with "scored"/"score", near-identical cards for
+the same item, and 4 cards written as orders to the reader. No criterion
+missed, so this goes after the problem my criteria were too loose to catch.
+The risk I was watching for was criterion 4: if the price moved out of the
+opening sentence, the model might drop it altogether.
 
 ### Run Log — After
 
+`python run_eval.py --label after`. Full output:
+`results/run_2026-10-11_1101_after.md`.
+
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. Full three-tool run returns a fit card | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. Impossible query stops before suggest_outfit | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. Selected item's id is the one both later tools receive | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. Fit card: 2-4 sentences, exact $ price, platform | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 5. Search results respect $30 ceiling and size M | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
 
-**Did it help, and how do I know:**
+The five criteria, plus the openings measure that none of them covers, on
+all 25 fit cards in each run:
 
-<!-- If it made things worse, say that. Honestly reported, that earns full
-     credit and is more interesting than one that worked. -->
+| Measure | Before | After |
+|---|---|---|
+| Criteria met (of 5) | 5 | 5 |
+| Criterion 4 tries passing | 5/5 | 5/5 |
+| Cards opening with "scored"/"score" (incl. "just"/"finally scored") | 24/25 | 0/25 |
+| Cards written as an order to the reader ("Score these…") | 4/25 | 0/25 |
+| Criterion-4 cards (same jacket, 5 tries) sharing their first five words | 4 of 5 identical | all 5 different |
+| Price and platform in every completed card | 25/25 | 25/25 |
 
+Criterion 4 openings, after:
 
+```
+The wash on this cropped Wrangler denim jacket is absolute perfection.
+Chasing that perfect casual streetwear vibe with this cropped light wash denim jacket.
+Double denim never felt so right when throwing on this cropped light wash Wrangler jacket.
+The wide-leg khaki trousers and white ribbed tank give this cropped light wash denim jacket such an effortless earth-tone feel.
+That double-denim streetwear vibe is undefeated, especially with the chunky white sneakers.
+```
+
+**Did it help, and how do I know:** Yes, for the problem it was aimed at,
+and it didn't break anything my criteria measure. The "scored" opening went
+from 24 of 25 cards to 0, the orders to the reader from 4 to 0, and the five
+cards for one jacket now open five different ways. All five criteria are
+still MET 5/5. In particular, every card still has the exact price and the
+platform, so moving them to sentence two cost nothing.
+
+It didn't make the cards original, though. **The model found a new stock
+opening:** 6 of 25 cards now start *"There is / There's nothing quite
+like…"* or *"…nothing better than…"*, and one more starts *"Nothing
+beats…"*. The second sentence is often *"I
+managed to grab it on <platform> for just $NN"*. Taking away the most
+likely opening moved the model to the next most likely one. That's better
+than 24 of 25, but it isn't variety.
+
+One correction to how I scored it: my scoring script first marked
+criterion 4 try 1 as FAIL with "$42 not found". The card says *"on Poshmark
+for just $42."* The script's price check didn't allow a full stop right
+after the number. I fixed the check, rescored both runs (the before
+verdicts didn't change), and read every card myself to confirm.
 
 ---
 
 ## What's Still Broken
 
-<!-- For each criterion still missed: what you'd do, and why you stopped where
-     you did. "I ran out of time" is fine if it's true. Pretending nothing is
-     left is not. -->
+No criterion is missed in either run, so nothing here is a missed target.
+These are the problems I know about and stopped short of fixing.
 
-
+- **The fit cards still have a stock opening.** 7 of 25 after-run cards
+  open with "there's nothing quite like / better than" or "nothing beats". *Next:* show the
+  model the opening of the previous card for the same item and tell it not
+  to reuse it, or pick an opening style at random in code before calling
+  the model. Then tighten criterion 4 the way Verdicts and Diagnoses
+  describes and measure it. *Why I stopped:* the unit allows one
+  improvement. A second prompt change would have muddied the before/after
+  comparison.
+- **Criterion 5's scenario only tests one listing.** Since search began
+  respecting item type, `'vintage graphic tee under $30, size M'` returns a
+  single tee, so the size filter has little to reject. *Next:* add a scenario
+  with many candidates of mixed sizes, e.g. `'vintage under $30, size M'`,
+  which reaches `L`, `XL`, waist and `One Size` listings. *Why I stopped:*
+  changing the scenarios between the before and after runs would have made
+  the two tables measure different things.
+- **A rate limit that never clears still crashes the run.** After
+  `MAX_RETRIES`, `generate.py` raises `RuntimeError`, not `ModelUnavailable`,
+  so the handler in `run_agent` doesn't catch it, and the user sees
+  `app.py`'s catch-all message and loses the found item. It never happened
+  in 60 tries because the limiter waited each time. *Next:* catch that error
+  in `run_agent` next to `ModelUnavailable`, with a "wait a minute and try
+  again" message. *Why I stopped:* it's a third change to the agent outside
+  the MCP move and the one improvement.
+- **Every MCP call starts the server.** An empty search with both filters
+  set starts it three times (the search plus two retries to word the
+  message). That's fine for 40 listings, and slow in a way you notice.
+  *Next:* hold one client session open for a whole run. *Why I stopped:*
+  `mcp_client.py` is the given plumbing, and the starter chose
+  one-call-one-server on purpose for this unit.
+- **Search treats any outerwear as a jacket.** `'denim jacket under $50'`
+  includes the *Denim Vest* because its category is `outerwear`. It's
+  ranked second, after the real denim jacket, so it never got selected in
+  the runs. But a vest isn't a jacket. *Why I stopped:* no criterion or
+  run turned it into a failure, and I wasn't going to change the search
+  without a measurement behind it.
 
 <!-- ═════════════════════════════════════════════════════════════════════
 
